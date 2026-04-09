@@ -12,6 +12,7 @@ const cacheNamePrefix = 'offline-cache-';
 const cacheName = `${cacheNamePrefix}${self.assetsManifest.version}`;
 const offlineAssetsInclude = [/\.dll$/, /\.pdb$/, /\.wasm/, /\.html/, /\.js$/, /\.json$/, /\.css$/, /\.woff$/, /\.png$/, /\.jpe?g$/, /\.gif$/, /\.ico$/, /\.blat$/, /\.dat$/, /\.webmanifest$/];
 const offlineAssetsExclude = [/^service-worker\.js$/];
+const sriOptionalAssets = [/\.(png|jpe?g|gif|ico|webmanifest)$/];
 
 // Replace with your base path if you are hosting on a subfolder. Ensure there is a trailing '/'.
 const base = "/";
@@ -21,11 +22,24 @@ const manifestUrlList = self.assetsManifest.assets.map(asset => new URL(asset.ur
 async function onInstall(event) {
     console.info('Service worker: Install');
 
-    const assetsRequests = self.assetsManifest.assets
+    const assetsToCache = self.assetsManifest.assets
         .filter(asset => offlineAssetsInclude.some(pattern => pattern.test(asset.url)))
-        .filter(asset => !offlineAssetsExclude.some(pattern => pattern.test(asset.url)))
-        .map(asset => new Request(asset.url, { integrity: asset.hash, cache: 'no-cache' }));
-    await caches.open(cacheName).then(cache => cache.addAll(assetsRequests));
+        .filter(asset => !offlineAssetsExclude.some(pattern => pattern.test(asset.url)));
+
+    const cache = await caches.open(cacheName);
+
+    for (const asset of assetsToCache) {
+        try {
+            await cache.add(new Request(asset.url, { integrity: asset.hash, cache: 'no-cache' }));
+        } catch (error) {
+            if (!sriOptionalAssets.some(pattern => pattern.test(asset.url))) {
+                throw error;
+            }
+
+            console.warn(`Service worker: retrying without integrity for ${asset.url}`, error);
+            await cache.add(new Request(asset.url, { cache: 'no-cache' }));
+        }
+    }
 }
 
 async function onActivate(event) {
@@ -56,8 +70,8 @@ async function handlePush(event) {
     const title = payload.title || 'Patinhas Magicas';
     const options = {
         body: payload.body || 'Voce recebeu uma nova notificacao.',
-        icon: 'icon-192.png',
-        badge: 'icon-192.png',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
         data: {
             url: payload.url || '/'
         }
